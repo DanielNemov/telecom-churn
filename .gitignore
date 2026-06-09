@@ -13,7 +13,7 @@ venv/
 .mypy_cache/
 mlruns/
 models/
-reports/
+reports/*.html
 data/raw/
 data/processed/
 *.pkl
