@@ -7,7 +7,8 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "etl"))
-from load import load_processed
+
+from load import load_processed  # noqa: E402
 
 REPORTS_DIR = os.path.join(
     os.path.dirname(__file__), "..", "..", "reports"

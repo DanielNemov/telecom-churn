@@ -1,20 +1,20 @@
-import sys
 import os
+import sys
+import warnings
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'etl'))
 
-import warnings
 warnings.filterwarnings('ignore')
 
-import numpy as np
-import pandas as pd
-import matplotlib
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import matplotlib  # noqa: E402
 matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import seaborn as sns
-
-from extract import extract
-from transform import transform
+import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.patches as mpatches  # noqa: E402
+import seaborn as sns  # noqa: E402
+from extract import extract  # noqa: E402
+from transform import transform  # noqa: E402
 
 plt.rcParams['figure.dpi'] = 120
 plt.rcParams['font.size'] = 11

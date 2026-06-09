@@ -3,12 +3,25 @@ import sys
 import pickle
 import time
 import mlflow
-import numpy as np
-import pandas as pd
-from sklearn.model_selection import train_test_split, RandomizedSearchCV, cross_val_score
-from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score, accuracy_score
+from sklearn.model_selection import (
+    train_test_split,
+    RandomizedSearchCV,
+    cross_val_score,
+)
+from sklearn.metrics import (
+    roc_auc_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    accuracy_score,
+)
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier, ExtraTreesClassifier
+from sklearn.ensemble import (
+    RandomForestClassifier,
+    GradientBoostingClassifier,
+    AdaBoostClassifier,
+    ExtraTreesClassifier,
+)
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from lightgbm import LGBMClassifier
@@ -16,9 +29,9 @@ from xgboost import XGBClassifier
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "etl"))
 
-from extract import extract
-from transform import transform
-from load import load, load_processed, PROCESSED_FILE
+from extract import extract  # noqa: E402
+from transform import transform  # noqa: E402
+from load import load, load_processed, PROCESSED_FILE  # noqa: E402
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "models")
 MODEL_PATH = os.path.join(MODELS_DIR, "best_model.pkl")
@@ -36,27 +49,45 @@ CANDIDATES = {
     "DecisionTree": DecisionTreeClassifier(random_state=42),
     "KNN": KNeighborsClassifier(),
     "LightGBM": LGBMClassifier(random_state=42, verbose=-1),
-    "XGBoost": XGBClassifier(random_state=42, eval_metric="logloss", verbosity=0),
+    "XGBoost": XGBClassifier(
+        random_state=42, eval_metric="logloss", verbosity=0
+    ),
 }
 
 PARAM_GRIDS = {
     "LogisticRegression": {"C": [0.01, 0.1, 1, 10]},
-    "RandomForest": {"n_estimators": [100, 200], "max_depth": [None, 10, 20]},
-    "GradientBoosting": {"n_estimators": [100, 200], "learning_rate": [0.05, 0.1]},
+    "RandomForest": {
+        "n_estimators": [100, 200],
+        "max_depth": [None, 10, 20],
+    },
+    "GradientBoosting": {
+        "n_estimators": [100, 200],
+        "learning_rate": [0.05, 0.1],
+    },
     "ExtraTrees": {"n_estimators": [100, 200], "max_depth": [None, 10]},
     "AdaBoost": {"n_estimators": [50, 100], "learning_rate": [0.5, 1.0]},
     "DecisionTree": {"max_depth": [5, 10, 20, None]},
     "KNN": {"n_neighbors": [3, 5, 7, 11]},
-    "LightGBM": {"n_estimators": [100, 200], "learning_rate": [0.05, 0.1], "num_leaves": [31, 63]},
-    "XGBoost": {"n_estimators": [100, 200], "learning_rate": [0.05, 0.1], "max_depth": [3, 6]},
+    "LightGBM": {
+        "n_estimators": [100, 200],
+        "learning_rate": [0.05, 0.1],
+        "num_leaves": [31, 63],
+    },
+    "XGBoost": {
+        "n_estimators": [100, 200],
+        "learning_rate": [0.05, 0.1],
+        "max_depth": [3, 6],
+    },
 }
 
 
-def compare_models(X_train, y_train) -> tuple[str, object, float]:
+def compare_models(X_train, y_train) -> tuple:
     print("Comparing models (5-fold CV by AUC)...")
     results = {}
     for name, model in CANDIDATES.items():
-        scores = cross_val_score(model, X_train, y_train, cv=5, scoring="roc_auc", n_jobs=1)
+        scores = cross_val_score(
+            model, X_train, y_train, cv=5, scoring="roc_auc", n_jobs=1
+        )
         results[name] = scores.mean()
         print(f"  {name}: AUC={scores.mean():.4f} (+/- {scores.std():.4f})")
     best_name = max(results, key=results.get)
@@ -64,15 +95,21 @@ def compare_models(X_train, y_train) -> tuple[str, object, float]:
     return best_name, CANDIDATES[best_name], results[best_name]
 
 
-def tune_model(name, model, X_train, y_train) -> object:
+def tune_model(name, model, X_train, y_train):
     print(f"Tuning {name} with RandomizedSearchCV...")
     param_grid = PARAM_GRIDS.get(name, {})
     if not param_grid:
         model.fit(X_train, y_train)
         return model
     search = RandomizedSearchCV(
-        model, param_grid, n_iter=10, cv=5, scoring="roc_auc",
-        random_state=42, n_jobs=1, verbose=0
+        model,
+        param_grid,
+        n_iter=10,
+        cv=5,
+        scoring="roc_auc",
+        random_state=42,
+        n_jobs=1,
+        verbose=0,
     )
     search.fit(X_train, y_train)
     print(f"Best params: {search.best_params_}")
@@ -114,7 +151,7 @@ def train() -> dict:
     with mlflow.start_run(run_name="automl-sklearn"):
         start = time.time()
 
-        best_name, best_model, cv_auc = compare_models(X_train, y_train)
+        best_name, best_model, _ = compare_models(X_train, y_train)
         tuned = tune_model(best_name, best_model, X_train, y_train)
         metrics = evaluate(tuned, X_test, y_test)
         elapsed = round(time.time() - start, 1)

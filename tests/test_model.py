@@ -1,8 +1,3 @@
-"""
-Tests for model loading and prediction interface.
-Uses a lightweight sklearn model (no PyCaret required for unit tests).
-"""
-
 import os
 import sys
 import pickle
@@ -10,7 +5,6 @@ import pytest
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "etl"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "model"))

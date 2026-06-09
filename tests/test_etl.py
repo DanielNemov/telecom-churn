@@ -1,7 +1,3 @@
-"""
-Tests for ETL pipeline: extract, transform, load.
-"""
-
 import os
 import sys
 import pytest
@@ -9,8 +5,8 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "etl"))
 
-from transform import transform
-from load import load
+from transform import transform  # noqa: E402
+from load import load  # noqa: E402
 
 
 class TestTransform:
