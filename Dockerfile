@@ -13,7 +13,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
-COPY data/ ./data/
 
 RUN mkdir -p data/raw data/processed models reports mlruns
 
