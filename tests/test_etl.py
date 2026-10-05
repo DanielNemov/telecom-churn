@@ -1,12 +1,8 @@
-import os
-import sys
-import pytest
 import pandas as pd
+import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "etl"))
-
-from transform import transform  # noqa: E402
-from load import load  # noqa: E402
+from telecom_churn.etl.load import load
+from telecom_churn.etl.transform import transform
 
 
 class TestTransform:
@@ -54,18 +50,18 @@ class TestTransform:
 
 class TestLoad:
     def test_load_creates_file(self, processed_df, tmp_path):
-        dest = str(tmp_path / "test_output.csv")
+        dest = tmp_path / "test_output.csv"
         path = load(processed_df, dest=dest)
-        assert os.path.exists(path)
+        assert path.exists()
 
     def test_load_file_has_correct_rows(self, processed_df, tmp_path):
-        dest = str(tmp_path / "test_output.csv")
+        dest = tmp_path / "test_output.csv"
         load(processed_df, dest=dest)
         loaded = pd.read_csv(dest)
         assert len(loaded) == len(processed_df)
 
     def test_load_file_has_correct_columns(self, processed_df, tmp_path):
-        dest = str(tmp_path / "test_output.csv")
+        dest = tmp_path / "test_output.csv"
         load(processed_df, dest=dest)
         loaded = pd.read_csv(dest)
         assert list(loaded.columns) == list(processed_df.columns)

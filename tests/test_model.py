@@ -1,35 +1,7 @@
-import os
-import sys
 import pickle
-import pytest
+
 import numpy as np
 import pandas as pd
-from sklearn.linear_model import LogisticRegression
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "etl"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "model"))
-
-
-@pytest.fixture
-def sample_features(processed_df) -> pd.DataFrame:
-    return processed_df.drop(columns=["Churn"])
-
-
-@pytest.fixture
-def sample_labels(processed_df) -> pd.Series:
-    return processed_df["Churn"]
-
-
-@pytest.fixture
-def trained_sklearn_model(processed_df, tmp_path):
-    X = processed_df.drop(columns=["Churn"])
-    y = processed_df["Churn"]
-    model = LogisticRegression(max_iter=1000, random_state=42)
-    model.fit(X, y)
-    model_path = tmp_path / "test_model.pkl"
-    with open(model_path, "wb") as f:
-        pickle.dump(model, f)
-    return model, str(model_path)
 
 
 class TestModelInterface:
@@ -49,7 +21,7 @@ class TestModelInterface:
         assert proba.shape == (len(sample_features), 2)
         assert np.allclose(proba.sum(axis=1), 1.0)
 
-    def test_model_serialization(self, trained_sklearn_model, sample_features, tmp_path):
+    def test_model_serialization(self, trained_sklearn_model, sample_features):
         model, model_path = trained_sklearn_model
         with open(model_path, "rb") as f:
             loaded = pickle.load(f)
@@ -71,6 +43,6 @@ class TestDataIntegrity:
 
     def test_features_all_numeric(self, sample_features):
         for col in sample_features.columns:
-            assert pd.api.types.is_numeric_dtype(sample_features[col]), (
-                f"Column {col} is not numeric"
-            )
+            assert pd.api.types.is_numeric_dtype(
+                sample_features[col]
+            ), f"Column {col} is not numeric"

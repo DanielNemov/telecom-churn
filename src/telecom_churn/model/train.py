@@ -1,69 +1,60 @@
-import os
-import sys
+from __future__ import annotations
+
+import logging
 import pickle
 import time
+
 import mlflow
-from sklearn.model_selection import (
-    train_test_split,
-    RandomizedSearchCV,
-    cross_val_score,
-)
-from sklearn.metrics import (
-    roc_auc_score,
-    f1_score,
-    precision_score,
-    recall_score,
-    accuracy_score,
-)
-from sklearn.linear_model import LogisticRegression
+from lightgbm import LGBMClassifier
 from sklearn.ensemble import (
-    RandomForestClassifier,
-    GradientBoostingClassifier,
     AdaBoostClassifier,
     ExtraTreesClassifier,
+    GradientBoostingClassifier,
+    RandomForestClassifier,
 )
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
+from sklearn.model_selection import RandomizedSearchCV, cross_val_score, train_test_split
 from sklearn.neighbors import KNeighborsClassifier
-from lightgbm import LGBMClassifier
+from sklearn.tree import DecisionTreeClassifier
 from xgboost import XGBClassifier
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "etl"))
-
-from extract import extract  # noqa: E402
-from transform import transform  # noqa: E402
-from load import load, load_processed, PROCESSED_FILE  # noqa: E402
-
-MODELS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "models")
-MODEL_PATH = os.path.join(MODELS_DIR, "best_model.pkl")
-MLFLOW_TRACKING_URI = os.environ.get(
-    "MLFLOW_TRACKING_URI",
-    os.path.join(os.path.dirname(__file__), "..", "..", "mlruns"),
+from telecom_churn.config import (
+    CV_FOLDS,
+    MLFLOW_EXPERIMENT,
+    MLFLOW_TRACKING_URI,
+    MODEL_PATH,
+    MODELS_DIR,
+    PROCESSED_FILE,
+    RANDOM_STATE,
+    TARGET_COL,
+    TEST_SIZE,
+    ensure_dirs,
 )
+from telecom_churn.etl.load import load_processed
+from telecom_churn.etl.pipeline import run_etl
+from telecom_churn.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 CANDIDATES = {
-    "LogisticRegression": LogisticRegression(max_iter=1000, random_state=42),
-    "RandomForest": RandomForestClassifier(n_estimators=100, random_state=42),
-    "GradientBoosting": GradientBoostingClassifier(random_state=42),
-    "ExtraTrees": ExtraTreesClassifier(n_estimators=100, random_state=42),
-    "AdaBoost": AdaBoostClassifier(algorithm="SAMME", random_state=42),
-    "DecisionTree": DecisionTreeClassifier(random_state=42),
+    "LogisticRegression": LogisticRegression(max_iter=1000, random_state=RANDOM_STATE),
+    "RandomForest": RandomForestClassifier(n_estimators=100, random_state=RANDOM_STATE),
+    "GradientBoosting": GradientBoostingClassifier(random_state=RANDOM_STATE),
+    "ExtraTrees": ExtraTreesClassifier(n_estimators=100, random_state=RANDOM_STATE),
+    "AdaBoost": AdaBoostClassifier(algorithm="SAMME", random_state=RANDOM_STATE),
+    "DecisionTree": DecisionTreeClassifier(random_state=RANDOM_STATE),
     "KNN": KNeighborsClassifier(),
-    "LightGBM": LGBMClassifier(random_state=42, verbose=-1),
+    "LightGBM": LGBMClassifier(random_state=RANDOM_STATE, verbose=-1),
     "XGBoost": XGBClassifier(
-        random_state=42, eval_metric="logloss", verbosity=0
+        random_state=RANDOM_STATE, eval_metric="logloss", verbosity=0
     ),
 }
 
 PARAM_GRIDS = {
     "LogisticRegression": {"C": [0.01, 0.1, 1, 10]},
-    "RandomForest": {
-        "n_estimators": [100, 200],
-        "max_depth": [None, 10, 20],
-    },
-    "GradientBoosting": {
-        "n_estimators": [100, 200],
-        "learning_rate": [0.05, 0.1],
-    },
+    "RandomForest": {"n_estimators": [100, 200], "max_depth": [None, 10, 20]},
+    "GradientBoosting": {"n_estimators": [100, 200], "learning_rate": [0.05, 0.1]},
     "ExtraTrees": {"n_estimators": [100, 200], "max_depth": [None, 10]},
     "AdaBoost": {"n_estimators": [50, 100], "learning_rate": [0.5, 1.0]},
     "DecisionTree": {"max_depth": [5, 10, 20, None]},
@@ -82,21 +73,21 @@ PARAM_GRIDS = {
 
 
 def compare_models(X_train, y_train) -> tuple:
-    print("Comparing models (5-fold CV by AUC)...")
+    logger.info("Comparing models (%s-fold CV by AUC)...", CV_FOLDS)
     results = {}
     for name, model in CANDIDATES.items():
         scores = cross_val_score(
-            model, X_train, y_train, cv=5, scoring="roc_auc", n_jobs=1
+            model, X_train, y_train, cv=CV_FOLDS, scoring="roc_auc", n_jobs=1
         )
         results[name] = scores.mean()
-        print(f"  {name}: AUC={scores.mean():.4f} (+/- {scores.std():.4f})")
+        logger.info("  %s: AUC=%.4f (+/- %.4f)", name, scores.mean(), scores.std())
     best_name = max(results, key=results.get)
-    print(f"\nBest model: {best_name} (AUC={results[best_name]:.4f})")
+    logger.info("Best model: %s (AUC=%.4f)", best_name, results[best_name])
     return best_name, CANDIDATES[best_name], results[best_name]
 
 
 def tune_model(name, model, X_train, y_train):
-    print(f"Tuning {name} with RandomizedSearchCV...")
+    logger.info("Tuning %s with RandomizedSearchCV...", name)
     param_grid = PARAM_GRIDS.get(name, {})
     if not param_grid:
         model.fit(X_train, y_train)
@@ -104,15 +95,15 @@ def tune_model(name, model, X_train, y_train):
     search = RandomizedSearchCV(
         model,
         param_grid,
-        n_iter=10,
-        cv=5,
+        n_iter=min(10, sum(len(v) for v in param_grid.values())),
+        cv=CV_FOLDS,
         scoring="roc_auc",
-        random_state=42,
+        random_state=RANDOM_STATE,
         n_jobs=1,
         verbose=0,
     )
     search.fit(X_train, y_train)
-    print(f"Best params: {search.best_params_}")
+    logger.info("Best params: %s", search.best_params_)
     return search.best_estimator_
 
 
@@ -128,29 +119,24 @@ def evaluate(model, X_test, y_test) -> dict:
     }
 
 
-def run_etl_if_needed() -> None:
-    if not os.path.exists(PROCESSED_FILE):
-        raw = extract()
-        processed = transform(raw)
-        load(processed)
-
-
 def train() -> dict:
-    run_etl_if_needed()
+    setup_logging()
+    ensure_dirs()
+    if not PROCESSED_FILE.exists():
+        run_etl()
     df = load_processed()
 
-    X = df.drop(columns=["Churn"])
-    y = df["Churn"]
+    X = df.drop(columns=[TARGET_COL])
+    y = df[TARGET_COL]
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
+        X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
     )
 
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    mlflow.set_experiment("telecom-churn")
+    mlflow.set_experiment(MLFLOW_EXPERIMENT)
 
     with mlflow.start_run(run_name="automl-sklearn"):
         start = time.time()
-
         best_name, best_model, _ = compare_models(X_train, y_train)
         tuned = tune_model(best_name, best_model, X_train, y_train)
         metrics = evaluate(tuned, X_test, y_test)
@@ -159,18 +145,18 @@ def train() -> dict:
         mlflow.log_param("best_model", best_name)
         mlflow.log_param("train_size", len(X_train))
         mlflow.log_param("test_size", len(X_test))
-        mlflow.log_param("cv_folds", 5)
+        mlflow.log_param("cv_folds", CV_FOLDS)
         mlflow.log_param("training_time_sec", elapsed)
         mlflow.log_metrics(metrics)
 
-        os.makedirs(MODELS_DIR, exist_ok=True)
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
         with open(MODEL_PATH, "wb") as f:
             pickle.dump({"model": tuned, "model_name": best_name}, f)
-        mlflow.log_artifact(MODEL_PATH)
+        mlflow.log_artifact(str(MODEL_PATH))
 
-        print(f"\nTraining complete in {elapsed}s. Metrics on test set:")
-        for k, v in metrics.items():
-            print(f"  {k}: {v:.4f}")
+        logger.info("Training complete in %ss. Metrics on test set:", elapsed)
+        for key, value in metrics.items():
+            logger.info("  %s: %.4f", key, value)
 
     return metrics
 

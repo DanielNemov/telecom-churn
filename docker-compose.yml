@@ -3,7 +3,7 @@ version: "3.9"
 services:
   etl:
     build: .
-    command: python src/etl/pipeline.py
+    command: churn-etl
     volumes:
       - ./data:/app/data
     environment:
@@ -11,7 +11,7 @@ services:
 
   train:
     build: .
-    command: python src/model/train.py
+    command: churn-train
     volumes:
       - ./data:/app/data
       - ./models:/app/models
@@ -24,7 +24,7 @@ services:
 
   monitor:
     build: .
-    command: python src/monitoring/monitor.py
+    command: churn-monitor
     volumes:
       - ./data:/app/data
       - ./mlruns:/app/mlruns

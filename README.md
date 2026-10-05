@@ -16,6 +16,52 @@ ML-пайплайн для предсказания оттока клиенто�
 
 ---
 
+## Production-стандарты
+
+Проект оформлен как устанавливаемый Python-пакет `telecom_churn` (src-layout).
+
+- Единый конфиг путей и гиперпараметров: `src/telecom_churn/config.py`
+- Логирование через `logging` вместо `print`
+- Импорты через пакет (`from telecom_churn.etl import transform`), без `sys.path.insert`
+- CLI-команды Poetry: `churn-etl`, `churn-train`, `churn-monitor`, `churn-predict`, `churn-plots`
+
+### Poetry и виртуальное окружение
+
+Окружение **интегрировано в Git-репозиторий** через:
+
+| Файл | Роль |
+|---|---|
+| `pyproject.toml` | манифест проекта, зависимости, CLI, настройки линтеров |
+| `poetry.lock` | точные версии пакетов (воспроизводимый install) |
+| `poetry.toml` | `virtualenvs.in-project = true` — venv создаётся в `.venv/` рядом с кодом |
+| `.python-version` | фиксированная версия Python 3.11 |
+
+Сама папка `.venv/` в git **не** коммитится (бинарники платформозависимы). В репозиторий попадает lockfile: любой клон делает `poetry install` и получает идентичное окружение.
+
+```bash
+pip install poetry
+poetry install
+poetry env info
+pre-commit install
+```
+
+### Pre-commit и линтеры
+
+Конфиг: `.pre-commit-config.yaml`. Хуки на каждый `git commit`:
+
+- trailing-whitespace, end-of-file-fixer, check-yaml/toml
+- **black** — форматирование
+- **isort** — сортировка импортов
+- **ruff** — быстрый линтер
+- **flake8** — стиль (max-line-length=100)
+
+```bash
+pre-commit install
+pre-commit run --all-files
+```
+
+---
+
 ## Схема пайплайна
 
 ```
@@ -45,7 +91,7 @@ Raw CSV
 
 ## ETL-пайплайн
 
-### Extract (`src/etl/extract.py`)
+### Extract (`src/telecom_churn/etl/extract.py`)
 
 Загрузка сырых данных из CSV-файла. Если файл отсутствует, выполняется автоматическая загрузка из публичного репозитория IBM.
 
@@ -53,7 +99,7 @@ Raw CSV
 df = extract()  # --> pd.DataFrame, 7043 строки x 21 столбец
 ```
 
-### Transform (`src/etl/transform.py`)
+### Transform (`src/telecom_churn/etl/transform.py`)
 
 | Операция | Детали |
 |---|---|
@@ -64,7 +110,7 @@ df = extract()  # --> pd.DataFrame, 7043 строки x 21 столбец
 | Многоклассовые категории | `Contract`, `PaymentMethod`, `InternetService` и др. → `LabelEncoder` |
 | Масштабирование | `tenure`, `MonthlyCharges`, `TotalCharges` → `StandardScaler` (mean=0, std=1) |
 
-### Load (`src/etl/load.py`)
+### Load (`src/telecom_churn/etl/load.py`)
 
 Сохранение обработанного DataFrame в `data/processed/telco_churn_processed.csv`.
 
@@ -74,14 +120,14 @@ df = extract()  # --> pd.DataFrame, 7043 строки x 21 столбец
 
 **Запуск ETL:**
 ```bash
-python src/etl/pipeline.py
+poetry run churn-etl
 ```
 
 ---
 
 ## Архитектура ML-модели (кастомный AutoML на scikit-learn)
 
-Реализован собственный AutoML-пайплайн в `src/model/train.py`, который автоматически:
+Реализован собственный AutoML-пайплайн в `src/telecom_churn/model/train.py`, который автоматически:
 
 1. **compare_models** — сравнивает 9 алгоритмов по 5-fold cross-validation (метрика AUC)
 2. **tune_model** — тюнинг гиперпараметров лучшей модели через `RandomizedSearchCV`
@@ -105,7 +151,7 @@ python src/etl/pipeline.py
 
 **Запуск обучения:**
 ```bash
-python src/model/train.py
+poetry run churn-train
 ```
 
 ### Метрики модели
@@ -141,7 +187,7 @@ python src/model/train.py
 
 **Запуск:**
 ```bash
-pytest tests/ -v
+poetry run pytest tests/ -v
 ```
 
 ---
@@ -151,20 +197,20 @@ pytest tests/ -v
 ### Dockerfile
 
 ```
-FROM python:3.11-slim          # базовый образ — минимальный Python 3.11
-RUN apt-get install gcc ...    # компиляторы для C-расширений (LightGBM и др.)
-COPY requirements.txt .        # установка зависимостей без кэша
-RUN pip install -r requirements.txt
-COPY src/ ./src/               # копирование исходного кода
-CMD ["python", "src/model/train.py"]  # точка входа — обучение модели
+FROM python:3.11-slim
+RUN pip install poetry
+COPY pyproject.toml poetry.lock .
+RUN poetry config virtualenvs.create false && poetry install --only main
+COPY src/ ./src/
+CMD ["churn-train"]
 ```
 
 ### Функции контейнеризации
 
-- **Изоляция среды**: все зависимости фиксированы в `requirements.txt`, воспроизводимость на любой машине
-- **Безопасность**: `python:3.11-slim` — минимальный образ без лишних пакетов; `.dockerignore` исключает секреты, логи, notebooks
-- **Оптимизация ресурсов**: `--no-cache-dir` при установке pip уменьшает размер образа; `libgomp1` для многопоточности LightGBM
-- **Volumes**: данные (`data/`), модели (`models/`) и MLflow (`mlruns/`) монтируются снаружи для персистентности
+- **Изоляция среды**: зависимости зафиксированы в `poetry.lock`
+- **Безопасность**: `python:3.11-slim` — минимальный образ; `.dockerignore` исключает секреты, логи, notebooks, `.venv`
+- **Оптимизация ресурсов**: Poetry ставит только группу `main`; `libgomp1` для LightGBM
+- **Volumes**: данные (`data/`), модели (`models/`) и MLflow (`mlruns/`) монтируются снаружи
 
 **Запуск:**
 ```bash
@@ -193,8 +239,8 @@ push / pull_request → main
     [test job]
     1. Checkout code
     2. Setup Python 3.11
-    3. pip install -r requirements.txt
-    4. flake8 lint (src/, tests/)
+    3. poetry install
+    4. ruff + flake8
     5. pytest tests/ -v
          |
          v (if tests pass)
@@ -230,7 +276,7 @@ git push origin v1.0.0
 
 ## Мониторинг
 
-Реализован в `src/monitoring/monitor.py`.
+Реализован в `src/telecom_churn/monitoring/monitor.py`.
 
 ### Мониторинг качества модели
 
@@ -250,8 +296,8 @@ git push origin v1.0.0
 
 **Запуск:**
 ```bash
-python src/monitoring/monitor.py
-mlflow ui --backend-store-uri mlruns/   # просмотр метрик
+poetry run churn-monitor
+poetry run mlflow ui --backend-store-uri mlruns/
 ```
 
 ![MLflow UI](reports/images/mlflow_monitoring.png)
@@ -266,10 +312,12 @@ mlflow ui --backend-store-uri mlruns/   # просмотр метрик
 | AutoML | scikit-learn, LightGBM, XGBoost |
 | Эксперимент-трекинг | MLflow |
 | Мониторинг дрейфа | evidently |
+| Менеджер зависимостей | Poetry |
+| Линтеры | ruff, flake8, black, isort, pre-commit |
 | Тестирование | pytest |
 | Контейнеризация | Docker, docker-compose |
 | CI/CD | GitHub Actions |
-| Язык | Python 3.12 |
+| Язык | Python 3.11 |
 
 ---
 
@@ -277,37 +325,30 @@ mlflow ui --backend-store-uri mlruns/   # просмотр метрик
 
 ```
 dz/
-├── data/
-│   ├── raw/                    # исходный CSV
-│   └── processed/              # после ETL
-├── src/
+├── src/telecom_churn/
+│   ├── config.py               # пути, seed, experiment names
+│   ├── logging_config.py
 │   ├── etl/
-│   │   ├── extract.py          # Extract: загрузка данных
-│   │   ├── transform.py        # Transform: очистка и кодирование
-│   │   ├── load.py             # Load: сохранение
-│   │   └── pipeline.py         # запуск полного ETL
+│   │   ├── extract.py
+│   │   ├── transform.py
+│   │   ├── load.py
+│   │   └── pipeline.py
 │   ├── model/
-│   │   ├── train.py            # AutoML: sklearn + LightGBM + XGBoost
-│   │   └── predict.py          # инференс
-│   └── monitoring/
-│       └── monitor.py          # MLflow + evidently
+│   │   ├── train.py
+│   │   └── predict.py
+│   ├── monitoring/
+│   │   └── monitor.py
+│   └── visualization/
+│       └── plots.py
 ├── tests/
-│   ├── conftest.py             # фикстуры pytest
-│   ├── test_etl.py             # тесты ETL
-│   └── test_model.py           # тесты модели
-├── notebooks/
-│   └── eda.ipynb               # EDA и визуализации
-├── reports/
-│   └── images/                 # графики для README
-├── models/                     # сохранённые модели (.pkl)
-├── mlruns/                     # MLflow артефакты
+├── pyproject.toml              # Poetry + линтеры
+├── poetry.lock                 # lockfile окружения в Git
+├── poetry.toml                 # in-project .venv
+├── .pre-commit-config.yaml
+├── .python-version
 ├── Dockerfile
 ├── docker-compose.yml
-├── .dockerignore
-├── requirements.txt
-└── .github/
-    └── workflows/
-        └── ci.yml              # GitHub Actions CI/CD
+└── .github/workflows/ci.yml
 ```
 
 ---
@@ -315,21 +356,13 @@ dz/
 ## Быстрый старт
 
 ```bash
-# 1. Установить зависимости
-pip install -r requirements.txt
+pip install poetry
+poetry install
+pre-commit install
 
-# 2. Запустить ETL
-python src/etl/pipeline.py
-
-# 3. Обучить модель (AutoML)
-python src/model/train.py
-
-# 4. Мониторинг
-python src/monitoring/monitor.py
-
-# 5. Тесты
-pytest tests/ -v
-
-# 6. MLflow UI
-mlflow ui --backend-store-uri mlruns/
+poetry run churn-etl
+poetry run churn-train
+poetry run churn-monitor
+poetry run pytest tests/ -v
+poetry run mlflow ui --backend-store-uri mlruns/
 ```

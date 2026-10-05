@@ -1,10 +1,10 @@
-import os
-import sys
-import pytest
-import pandas as pd
+import pickle
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "etl"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "model"))
+import pandas as pd
+import pytest
+from sklearn.linear_model import LogisticRegression
+
+from telecom_churn.etl.transform import transform
 
 
 @pytest.fixture
@@ -55,6 +55,21 @@ def raw_df() -> pd.DataFrame:
 
 @pytest.fixture
 def processed_df(raw_df) -> pd.DataFrame:
-    from transform import transform
-
     return transform(raw_df)
+
+
+@pytest.fixture
+def sample_features(processed_df) -> pd.DataFrame:
+    return processed_df.drop(columns=["Churn"])
+
+
+@pytest.fixture
+def trained_sklearn_model(processed_df, tmp_path):
+    X = processed_df.drop(columns=["Churn"])
+    y = processed_df["Churn"]
+    model = LogisticRegression(max_iter=1000, random_state=42)
+    model.fit(X, y)
+    model_path = tmp_path / "test_model.pkl"
+    with open(model_path, "wb") as f:
+        pickle.dump(model, f)
+    return model, str(model_path)

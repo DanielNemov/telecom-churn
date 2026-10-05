@@ -19,24 +19,31 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.8.4
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Load cached venv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
 
       - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install flake8
+        run: poetry install --no-interaction --no-ansi
+
+      - name: Lint with ruff
+        run: poetry run ruff check src tests
 
       - name: Lint with flake8
-        run: |
-          flake8 src/ tests/ \
-            --max-line-length=100 \
-            --exclude=__pycache__ \
-            --ignore=E203,W503
+        run: poetry run flake8 src tests
 
       - name: Run tests with pytest
-        run: |
-          pytest tests/ -v --tb=short
+        run: poetry run pytest tests/ -v --tb=short
 
   build:
     name: Build Docker Image
@@ -57,4 +64,4 @@ jobs:
 
       - name: Verify image runs
         run: |
-          docker run --rm telecom-churn:latest python -c "import mlflow; import lightgbm; import xgboost; print('OK')"
+          docker run --rm telecom-churn:latest python -c "import telecom_churn; import mlflow; import lightgbm; print('OK')"
